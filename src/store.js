@@ -49,10 +49,17 @@ export function findStore(start) {
 
 /** Refuse obviously wrong roots such as the home folder or a drive root. */
 export function unsafeRootReason(root) {
-  const r = path.resolve(root);
+  // Compare real paths: on macOS /var is a symlink to /private/var, and home
+  // folders can be symlinks too.
+  const real = (p) => {
+    const abs = path.resolve(p);
+    let r;
+    try { r = fs.realpathSync.native(abs); } catch { r = abs; }
+    return process.platform === 'win32' ? r.toLowerCase() : r;
+  };
+  const r = real(root);
   if (path.dirname(r) === r) return 'it is a filesystem root';
-  const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
-  if (norm(r) === norm(path.resolve(os.homedir()))) return 'it is your home folder';
+  if (r === real(os.homedir())) return 'it is your home folder';
   return null;
 }
 
