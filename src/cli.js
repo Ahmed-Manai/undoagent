@@ -5,7 +5,8 @@ import { initStore, undo, redo, rewind, ConflictError } from './turns.js';
 import { runClaudeHook, installHooks, uninstallHooks, hooksInstalled } from './claude.js';
 
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-const color = process.stdout.isTTY && !process.env.NO_COLOR;
+const forced = process.env.FORCE_COLOR !== undefined && process.env.FORCE_COLOR !== '0';
+const color = (process.stdout.isTTY || forced) && !process.env.NO_COLOR;
 const paint = (code) => (s) => (color ? `\x1b[${code}m${s}\x1b[0m` : String(s));
 const dim = paint('2');
 const bold = paint('1');

@@ -2,6 +2,10 @@
 
 **Undo for AI coding agents.** Every prompt you give your agent becomes a checkpoint. If the agent breaks something, one command puts your files back, including changes it made by running shell commands.
 
+![Claude Code deletes a folder with rm -rf; undoagent undo brings it back](https://raw.githubusercontent.com/Ahmed-Manai/undoagent/main/docs/demo.gif)
+
+<sub>A real Claude Code session, recorded and sped up.</sub>
+
 ```bash
 npm install -g undoagent
 cd your-project
