@@ -24,6 +24,8 @@ jobs:
         run: |
           v="$(node -p "require('./package.json').version")"
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Tag ${GITHUB_REF_NAME} does not match package.json version v$v"; exit 1; }
-      - run: npm publish --provenance --access public
+      # Provenance needs a public repository; it switches on automatically
+      # once the repo is made public.
+      - run: npm publish --access public ${{ github.event.repository.private && ' ' || '--provenance' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
