@@ -1,0 +1,23 @@
+name: Bug report
+description: Something didn't undo, or undid the wrong thing
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did the agent do, what did you run, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output of `undoagent list` and the failing command
+      render: console
+  - type: input
+    id: env
+    attributes:
+      label: OS, Node version, git version, undoagent version
+      placeholder: "Windows 11, Node 22.14, git 2.45, undoagent 0.1.0"
+    validations:
+      required: true

@@ -1,0 +1,15 @@
+name: Support another agent
+description: Ask for undoagent to work with another coding agent
+labels: [agent-request]
+body:
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent?
+      options: [Codex CLI, Gemini CLI, Cursor, GitHub Copilot, Cline, Roo Code, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: How do you use it, and what would undo save you from?
