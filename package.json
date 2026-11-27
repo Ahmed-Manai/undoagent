@@ -1,7 +1,7 @@
 {
   "name": "undoagent",
-  "version": "0.1.1",
-  "description": "Undo for AI coding agents. Every prompt becomes a checkpoint you can undo, redo or rewind, including changes made by shell commands.",
+  "version": "0.2.0",
+  "description": "Undo for AI coding agents (Claude Code, Codex). Every prompt becomes a checkpoint you can undo, redo or rewind, including changes made by shell commands.",
   "author": "Ahmed Manai",
   "repository": {
     "type": "git",
@@ -29,6 +29,7 @@
   },
   "keywords": [
     "claude-code",
+    "codex",
     "ai",
     "agent",
     "undo",

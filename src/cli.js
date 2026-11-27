@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { git } from './git.js';
 import { findStore, readHistory, storeFor, unsafeRootReason, NAME } from './store.js';
 import { initStore, undo, redo, rewind, ConflictError } from './turns.js';
-import { runClaudeHook, installHooks, uninstallHooks, hooksInstalled } from './claude.js';
+import { AGENTS, agentById, globalAgents, runHook, installHooks, uninstallHooks, hooksInstalled } from './agents.js';
 
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const forced = process.env.FORCE_COLOR !== undefined && process.env.FORCE_COLOR !== '0';
@@ -17,8 +17,10 @@ const yellow = paint('33');
 const HELP = `${bold(NAME)} ${pkg.version} - undo for AI coding agents
 
 Usage:
-  ${NAME} init [--global]      Start tracking: installs Claude Code hooks
-                               (this project, or every project with --global)
+  ${NAME} init [--global]      Start tracking this project, or every project
+                               with --global. Sets up hooks for the agents
+                               found on this machine (Claude Code, Codex);
+                               pick them with --agent claude,codex
   ${NAME} list [-n N]          Show recent agent turns
   ${NAME} diff [ID] [--stat]   Show what a turn changed (default: latest)
   ${NAME} undo [ID] [--force]  Undo the latest turn, or turn ID
@@ -35,6 +37,8 @@ function parse(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-n') flags.n = Number(argv[++i]);
+    else if (a === '--agent') flags.agent = argv[++i];
+    else if (a.startsWith('--agent=')) flags.agent = a.slice(8);
     else if (a.startsWith('--')) flags[a.slice(2)] = true;
     else if (a === '-h') flags.help = true;
     else if (a === '-v') flags.version = true;
@@ -71,6 +75,16 @@ function oneLine(s, max) {
   return t.length > max ? t.slice(0, max - 1) + '…' : t;
 }
 
+function shortAgent(id) {
+  return { claude: 'claude', 'claude-code': 'claude', codex: 'codex' }[id] || id || '';
+}
+
+function pickAgents(spec) {
+  if (spec) return [...new Set(spec.split(',').map((s) => s.trim()).filter(Boolean))].map(agentById);
+  const found = Object.values(AGENTS).filter((a) => a.detect());
+  return found.length ? found : [AGENTS.claude];
+}
+
 function describe(e) {
   if (e.type === 'turn') return oneLine(e.prompt, 60) || dim('(no prompt)');
   return yellow(e.label);
@@ -85,25 +99,39 @@ function printFiles(files, max = 15) {
 const commands = {
   init({ flags }) {
     const root = process.cwd();
+    const global = !!flags.global;
     const unsafe = unsafeRootReason(root);
-    if (unsafe && !flags.global) throw new Error(`won't track ${root}: ${unsafe}. Run this inside a project folder.`);
+    if (unsafe && !global) throw new Error(`won't track ${root}: ${unsafe}. Run this inside a project folder.`);
+    const agents = pickAgents(flags.agent);
     if (!unsafe) {
       const created = initStore(storeFor(root));
       console.log(created ? `${green('✓')} Baseline snapshot taken of ${root}` : `${green('✓')} Already tracking ${root}`);
     }
-    const r = installHooks({ global: !!flags.global, root });
-    console.log(`${green('✓')} Claude Code hooks added to ${r.file}`);
-    if (r.ephemeral) {
+    let ephemeral = false;
+    for (const agent of agents) {
+      const r = installHooks(agent, { global, root });
+      ephemeral ||= r.ephemeral;
+      console.log(`${green('✓')} ${agent.label} hooks added to ${r.file}`);
+      console.log(dim(`    ${agent.afterInstall}`));
+    }
+    if (ephemeral) {
       console.log(yellow(`! You ran ${NAME} through npx. Install it so the hooks keep working:`));
       console.log(`    npm install -g ${NAME}`);
     }
-    console.log(`\nEvery Claude Code prompt in ${flags.global ? 'any project' : 'this project'} is now a turn you can undo.`);
-    console.log(`Restart any running Claude Code session, then try: ${bold(`${NAME} list`)}`);
+    const names = agents.map((a) => a.label).join(' and ');
+    console.log(`
+Every ${names} prompt in ${global ? 'any project' : 'this project'} is now a turn you can undo.`);
+    console.log(`Try it, then run: ${bold(`${NAME} list`)}`);
   },
 
   uninstall({ flags }) {
-    const r = uninstallHooks({ global: !!flags.global, root: process.cwd() });
-    console.log(r.removed ? `${green('✓')} Removed hooks from ${r.file}` : `No ${NAME} hooks found in ${r.file}`);
+    const global = !!flags.global;
+    const agents = flags.agent ? pickAgents(flags.agent) : Object.values(AGENTS);
+    for (const agent of agents) {
+      const r = uninstallHooks(agent, { global, root: process.cwd() });
+      if (r.shared) console.log(dim(`${agent.label} hooks are shared by all projects; remove them with "${NAME} uninstall --global".`));
+      else if (r.removed) console.log(`${green('✓')} Removed ${agent.label} hooks from ${r.file}`);
+    }
   },
 
   list({ flags }) {
@@ -114,11 +142,12 @@ const commands = {
       console.log('No agent turns recorded yet. Ask your agent to change something, then run this again.');
       return;
     }
-    console.log(dim('   #  time         files  what'));
+    console.log(dim('   #  time         agent   files  what'));
     for (const e of entries) {
       const state = e.post === null ? yellow(' [running]') : e.undoneBy ? dim(` [undone by #${e.undoneBy}]`) : '';
       const files = e.post === null ? '  …' : String(e.files.length).padStart(3);
-      const line = `${String(e.id).padStart(4)}  ${when(e.start).padEnd(11)}  ${files}   ${describe(e)}${state}`;
+      const agent = (e.type === 'turn' ? shortAgent(e.agent) : '').padEnd(6);
+      const line = `${String(e.id).padStart(4)}  ${when(e.start).padEnd(11)}  ${agent} ${files}   ${describe(e)}${state}`;
       console.log(e.undoneBy ? dim(line) : line);
     }
   },
@@ -166,22 +195,25 @@ const commands = {
   status() {
     const root = process.cwd();
     const store = findStore(root);
-    const local = hooksInstalled({ global: false, root: store?.root || root });
-    const global = hooksInstalled({ global: true, root });
     console.log(`project:  ${store ? store.root : dim('(not tracked)')}`);
     if (store) {
       const h = readHistory(store);
       console.log(`turns:    ${h.entries.filter((e) => e.type === 'turn').length}`);
       console.log(`storage:  ${store.dir}`);
     }
-    console.log(`hooks:    project ${local ? green('on') : dim('off')}, global ${global ? green('on') : dim('off')}`);
+    const everywhere = globalAgents();
+    for (const agent of Object.values(AGENTS)) {
+      const here = hooksInstalled(agent, { global: false, root: store?.root || root });
+      const user = hooksInstalled(agent, { global: true, root });
+      const where = here ? 'this project' : user ? (everywhere[agent.id] ? 'every project' : 'tracked projects') : null;
+      console.log(`${(agent.label + ':').padEnd(10)}${where ? green(`hooks on (${where})`) : dim('hooks off')}`);
+    }
   },
 
   hook({ args }) {
-    if (args[0] !== 'claude') throw new Error(`unknown agent: ${args[0]}`);
     let raw = '';
     try { raw = fs.readFileSync(0, 'utf8'); } catch { /* no stdin */ }
-    runClaudeHook(raw);
+    runHook(args[0], raw);
   },
 };
 

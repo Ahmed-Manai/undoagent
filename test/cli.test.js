@@ -26,10 +26,11 @@ function cli(...args) {
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 
-function hook(event, extra = {}) {
+function hook(event, extra = {}, agent = 'claude') {
   const input = JSON.stringify({ hook_event_name: event, session_id: 's1', cwd: proj, ...extra });
-  const r = spawnSync(process.execPath, [BIN, 'hook', 'claude'], {
-    cwd: proj, env: { ...env(), CLAUDE_PROJECT_DIR: proj }, input, encoding: 'utf8',
+  const extraEnv = agent === 'claude' ? { CLAUDE_PROJECT_DIR: proj } : {};
+  const r = spawnSync(process.execPath, [BIN, 'hook', agent], {
+    cwd: proj, env: { ...env(), ...extraEnv }, input, encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, '', 'hook must not print to stdout');
@@ -74,7 +75,7 @@ test('undo reverts edits, creations and deletions; redo re-applies them', () => 
   });
   const list = cli('list').out;
   assert.match(list, /refactor everything/);
-  assert.match(list, /\s3\s+refactor everything/);
+  assert.match(list, /claude\s+3\s+refactor everything/);
 
   const u = cli('undo');
   assert.equal(u.code, 0, u.err);
@@ -192,13 +193,107 @@ test('an interrupted turn is closed by the next prompt', () => {
 });
 
 test('the hook never fails the agent, even on garbage input', () => {
-  const r = spawnSync(process.execPath, [BIN, 'hook', 'claude'], { cwd: proj, env: env(), input: 'not json', encoding: 'utf8' });
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout, '');
+  for (const agent of ['claude', 'codex', 'nonsense']) {
+    const r = spawnSync(process.execPath, [BIN, 'hook', agent], { cwd: proj, env: env(), input: 'not json', encoding: 'utf8' });
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, '');
+  }
 });
 
 test('init refuses to track the home folder', () => {
   const r = spawnSync(process.execPath, [BIN, 'init'], { cwd: home, env: env(), encoding: 'utf8' });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /home folder/);
+});
+
+// ---------- Codex ----------
+// Payloads mirror codex-rs/hooks/src/events/{user_prompt_submit,stop}.rs.
+
+function codexTurn(prompt, work, { cwd = proj, session = 'thread-1' } = {}) {
+  const base = { session_id: session, turn_id: 't', cwd, model: 'gpt', permission_mode: 'default', transcript_path: null };
+  hook('UserPromptSubmit', { ...base, prompt, agent_id: null, agent_type: null }, 'codex');
+  work();
+  hook('Stop', { ...base, stop_hook_active: false, last_assistant_message: 'done' }, 'codex');
+}
+
+const codexHooks = () => JSON.parse(fs.readFileSync(path.join(home, '.codex', 'hooks.json'), 'utf8'));
+
+test('init sets up the agents it finds; Codex hooks go to ~/.codex/hooks.json and keep existing ones', () => {
+  fs.mkdirSync(path.join(home, '.codex'));
+  fs.writeFileSync(path.join(home, '.codex', 'hooks.json'), JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo mine' }] }] },
+  }));
+  const r = cli('init');
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /Codex hooks added/);
+  assert.match(r.out, /Trust all and continue/);
+  assert.doesNotMatch(r.out, /Claude Code hooks/, 'Claude Code is not installed in this fake home');
+  cli('init');
+  const h = codexHooks();
+  assert.equal(h.hooks.UserPromptSubmit.length, 1);
+  assert.equal(h.hooks.Stop.length, 2);
+  assert.equal(h.hooks.Stop[0].hooks[0].command, 'echo mine');
+  const ours = h.hooks.Stop[1].hooks[0];
+  assert.equal(ours.type, 'command');
+  assert.equal(ours.timeout, 60);
+  assert.match(ours.command, /hook codex$/);
+  if (process.platform === 'win32') assert.doesNotMatch(ours.command, /\//, 'cmd /C gets Windows paths');
+});
+
+test('Codex turns can be undone, and show up next to Claude Code turns', () => {
+  write('a.txt', 'a1\n');
+  write('b.txt', 'b1\n');
+  cli('init', '--agent', 'claude,codex');
+  turn('claude edits a', () => write('a.txt', 'a2\n'));
+  codexTurn('codex edits b', () => { write('b.txt', 'b2\n'); write('gen/out.txt', 'x'); });
+  const list = cli('list').out;
+  assert.match(list, /codex\s+2\s+codex edits b/);
+  assert.match(list, /claude\s+1\s+claude edits a/);
+  assert.equal(cli('undo').code, 0);
+  assert.equal(read('b.txt'), 'b1\n');
+  assert.ok(!exists('gen'));
+  assert.equal(read('a.txt'), 'a2\n', 'the Claude Code turn is untouched');
+});
+
+test('Codex hooks only act in tracked projects, from any subfolder', () => {
+  const other = path.join(tmp, 'untracked');
+  fs.mkdirSync(other);
+  fs.writeFileSync(path.join(other, 'x.txt'), '1');
+  write('src/a.txt', '1\n');
+  cli('init', '--agent', 'codex');
+  codexTurn('in untracked folder', () => fs.writeFileSync(path.join(other, 'x.txt'), '2'), { cwd: other });
+  codexTurn('from a subfolder', () => write('src/a.txt', '2\n'), { cwd: p('src') });
+  const list = cli('list').out;
+  assert.match(list, /from a subfolder/);
+  assert.doesNotMatch(list, /untracked/);
+  assert.equal(cli('undo').code, 0);
+  assert.equal(read('src/a.txt'), '1\n');
+});
+
+test('Codex subagent prompts do not split the parent turn', () => {
+  write('a.txt', '1\n');
+  cli('init', '--agent', 'codex');
+  const base = { session_id: 'thread-1', cwd: proj };
+  hook('UserPromptSubmit', { ...base, prompt: 'parent task' }, 'codex');
+  write('a.txt', '2\n');
+  hook('UserPromptSubmit', { ...base, prompt: 'subagent task', agent_id: 'sub-1', agent_type: 'worker' }, 'codex');
+  write('a.txt', '3\n');
+  hook('Stop', base, 'codex');
+  const list = cli('list').out;
+  assert.match(list, /parent task/);
+  assert.doesNotMatch(list, /subagent task/);
+  cli('undo');
+  assert.equal(read('a.txt'), '1\n');
+});
+
+test('init --global tracks new projects until uninstall --global', () => {
+  fs.mkdirSync(path.join(home, '.codex'));
+  assert.equal(cli('init', '--global', '--agent', 'codex').code, 0);
+  write('a.txt', '1\n');
+  codexTurn('global turn', () => write('a.txt', '2\n'));
+  assert.match(cli('list').out, /global turn/);
+  assert.match(cli('status').out, /Codex:\s+hooks on \(every project\)/);
+  assert.equal(cli('uninstall', '--global').code, 0);
+  assert.equal(codexHooks().hooks, undefined);
+  assert.match(cli('status').out, /Codex:\s+hooks off/);
 });
