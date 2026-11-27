@@ -297,3 +297,68 @@ test('init --global tracks new projects until uninstall --global', () => {
   assert.equal(codexHooks().hooks, undefined);
   assert.match(cli('status').out, /Codex:\s+hooks off/);
 });
+
+// ---------- awkward real-world cases ----------
+
+test('file names with spaces, accents, CJK and leading dashes round-trip', () => {
+  const names = ['my notes.md', 'café/naïve file.txt', '-rf.txt', '日本語.txt', '[draft] (v2).md'];
+  for (const n of names) write(n, `original ${n}\n`);
+  cli('init');
+  turn('rename things', () => {
+    write(names[0], 'changed\n');
+    fs.rmSync(p(names[1]));
+    fs.rmSync(p(names[2]));
+    write('new folder/über ñ.txt', 'new\n');
+    write(names[4], 'changed\n');
+  });
+  assert.equal(cli('undo').code, 0);
+  for (const n of names) assert.equal(read(n), `original ${n}\n`, n);
+  assert.ok(!exists('new folder'));
+});
+
+test('a project path with spaces works, and installed hook commands run as the agents run them', () => {
+  proj = path.join(tmp, 'my project (copy)');
+  fs.mkdirSync(proj);
+  fs.mkdirSync(path.join(home, '.claude'));
+  fs.mkdirSync(path.join(home, '.codex'));
+  write('a.txt', '1\n');
+  assert.equal(cli('init').code, 0);
+  const claudeCmd = JSON.parse(read('.claude/settings.local.json')).hooks.Stop[0].hooks[0].command;
+  const codexCmd = codexHooks().hooks.Stop[0].hooks[0].command;
+  const win = process.platform === 'win32';
+  // Claude Code runs hooks with bash (Git Bash on Windows); Codex with cmd /C on Windows, sh -lc elsewhere.
+  const runAs = (command, shell, event) => spawnSync(command, {
+    shell, cwd: proj, encoding: 'utf8', env: { ...env(), CLAUDE_PROJECT_DIR: proj },
+    input: JSON.stringify({ hook_event_name: event, session_id: 'real', cwd: proj, prompt: 'via shell' }),
+  });
+  for (const [command, shell] of [[claudeCmd, 'bash'], [codexCmd, win ? 'cmd.exe' : '/bin/sh']]) {
+    const start = runAs(command.replace(/hook \w+$/, (m) => m), shell, 'UserPromptSubmit');
+    assert.equal(start.status, 0, `${shell}: ${start.stderr}`);
+    write('a.txt', `${shell}\n`);
+    const stop = runAs(command, shell, 'Stop');
+    assert.equal(stop.status, 0, `${shell}: ${stop.stderr}`);
+  }
+  const list = cli('list').out;
+  assert.equal((list.match(/via shell/g) || []).length, 2, list);
+  assert.ok(!fs.existsSync(path.join(tmp, 'store', 'error.log')), 'no hook errors');
+});
+
+test('a nested git repository inside the project does not break snapshots', () => {
+  write('a.txt', '1\n');
+  write('vendor/lib/x.txt', 'lib\n');
+  spawnSync('git', ['init', '-q'], { cwd: p('vendor/lib') });
+  cli('init');
+  turn('edit both', () => { write('a.txt', '2\n'); write('vendor/lib/x.txt', 'changed\n'); });
+  assert.equal(cli('undo').code, 0);
+  assert.equal(read('a.txt'), '1\n');
+  assert.ok(!fs.existsSync(path.join(tmp, 'store', 'error.log')), 'no hook errors');
+});
+
+test('symlinks are restored as symlinks', { skip: process.platform === 'win32' && 'needs symlink rights on Windows' }, () => {
+  write('target.txt', 'real\n');
+  fs.symlinkSync('target.txt', p('link.txt'));
+  cli('init');
+  turn('remove link', () => fs.rmSync(p('link.txt')));
+  assert.equal(cli('undo').code, 0);
+  assert.equal(fs.readlinkSync(p('link.txt')), 'target.txt');
+});

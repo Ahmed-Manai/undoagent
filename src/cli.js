@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { git } from './git.js';
 import { findStore, readHistory, storeFor, unsafeRootReason, NAME } from './store.js';
-import { initStore, undo, redo, rewind, ConflictError } from './turns.js';
+import { initStore, undo, redo, rewind, fillFileLists, ConflictError } from './turns.js';
 import { AGENTS, agentById, globalAgents, runHook, installHooks, uninstallHooks, hooksInstalled } from './agents.js';
 
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -136,7 +136,7 @@ Every ${names} prompt in ${global ? 'any project' : 'this project'} is now a tur
 
   list({ flags }) {
     const store = requireStore();
-    const h = readHistory(store);
+    const h = fillFileLists(store);
     const entries = h.entries.slice(-(flags.n || 20)).reverse();
     if (!entries.length) {
       console.log('No agent turns recorded yet. Ask your agent to change something, then run this again.');

@@ -20,17 +20,42 @@ export function initStore(store) {
   });
 }
 
-/** Close any open turn for this session against `post`. */
+/**
+ * Close any open turn for this session against `post`. The list of changed
+ * files is left for later (see fillFileLists) to keep hooks fast.
+ */
 function closeOpen(store, h, session, post) {
   for (const e of h.entries) {
     if (e.type === 'turn' && e.post === null && e.session === session) {
       e.post = post;
       e.end = now();
-      e.files = changedFiles(store, e.pre, post);
+      e.files = e.pre === post ? [] : null;
     }
   }
   // Drop turns that changed nothing; they only add noise.
-  h.entries = h.entries.filter((e) => !(e.type === 'turn' && e.post !== null && e.files.length === 0));
+  h.entries = h.entries.filter((e) => !(e.type === 'turn' && e.post !== null && e.pre === e.post));
+}
+
+/** Compute and save any changed-file lists that hooks skipped. */
+export function fillFileLists(store) {
+  return withLock(store, () => {
+    const h = readHistory(store);
+    let changed = false;
+    for (const e of h.entries) {
+      if (e.post !== null && !Array.isArray(e.files)) {
+        e.files = changedFiles(store, e.pre, e.post);
+        changed = true;
+      }
+    }
+    // A turn can net to nothing when another session snapshotted in between.
+    const kept = h.entries.filter((e) => !(e.type === 'turn' && Array.isArray(e.files) && e.files.length === 0 && e.post !== null));
+    if (kept.length !== h.entries.length) {
+      h.entries = kept;
+      changed = true;
+    }
+    if (changed) writeHistory(store, h);
+    return h;
+  });
 }
 
 /** Called when the user submits a prompt: snapshot "before". */

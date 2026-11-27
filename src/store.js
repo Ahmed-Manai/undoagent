@@ -153,7 +153,22 @@ export function writeHistory(store, h) {
 
 // ---------- snapshots ----------
 
-function headCommit(store) {
+// Each git call costs a process start (about 100 ms on Windows), while the
+// work itself is tiny, so snapshots use as few calls as possible: "add" and
+// "commit" (which exits early when nothing changed). The resulting commit id
+// is read straight from the ref file.
+
+/** Current snapshot commit, or null before the first one. */
+export function headCommit(store) {
+  try {
+    const head = fs.readFileSync(path.join(store.gitDir, 'HEAD'), 'utf8').trim();
+    const ref = head.match(/^ref: (refs\/\S+)$/)?.[1];
+    if (ref) {
+      const loose = path.join(store.gitDir, ...ref.split('/'));
+      if (fs.existsSync(loose)) return fs.readFileSync(loose, 'utf8').trim();
+      if (!fs.existsSync(path.join(store.gitDir, 'packed-refs'))) return null; // unborn branch
+    }
+  } catch { /* fall through to git */ }
   const r = git(store, ['rev-parse', '--verify', '-q', 'HEAD'], { allowFail: true });
   return r.status === 0 ? r.stdout.trim() : null;
 }
@@ -161,17 +176,19 @@ function headCommit(store) {
 /** Record the current state of the work tree; returns a commit id. */
 export function snapshot(store, message) {
   git(store, ['add', '--all', '--ignore-errors', '.'], { allowFail: true });
-  const tree = git(store, ['write-tree']).stdout.trim();
-  const parent = headCommit(store);
-  if (parent) {
-    const parentTree = git(store, ['rev-parse', `${parent}^{tree}`]).stdout.trim();
-    if (parentTree === tree) return parent;
+  const before = headCommit(store);
+  const args = [
+    '-c', `core.hooksPath=${path.join(store.dir, 'no-hooks')}`, // never run the user's global git hooks
+    'commit', '--quiet', '--no-verify', '--no-status', '-m', message || 'snapshot',
+  ];
+  if (!before) args.push('--allow-empty');
+  const r = git(store, args, { allowFail: true, env: { LC_ALL: 'C', LANG: 'C' } });
+  if (r.status !== 0) {
+    const out = `${r.stdout}${r.stderr}`;
+    if (before && /nothing to commit|nothing added|no changes added/.test(out)) return before;
+    throw new Error(`snapshot failed: ${out.trim()}`);
   }
-  const args = ['commit-tree', tree, '-m', message || 'snapshot'];
-  if (parent) args.push('-p', parent);
-  const commit = git(store, args).stdout.trim();
-  git(store, ['update-ref', 'HEAD', commit]);
-  return commit;
+  return headCommit(store);
 }
 
 /** Files that differ between two snapshots: [{ status: 'A'|'M'|'D'|'T', path }] */

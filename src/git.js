@@ -36,6 +36,8 @@ export function git(store, args, opts = {}) {
     '-c', 'core.quotepath=false',
     '-c', 'core.longpaths=true',
     '-c', 'commit.gpgsign=false',
+    '-c', 'core.fscache=true', // Git for Windows: cache file stats (ignored elsewhere)
+    '-c', 'core.preloadindex=true',
     ...args,
   ];
   return run(full, { cwd: store.root, ...opts });
@@ -47,7 +49,7 @@ export function run(args, opts = {}) {
     input: opts.input,
     encoding: opts.encoding === undefined ? 'utf8' : opts.encoding,
     maxBuffer: 1 << 30,
-    env: gitEnv(),
+    env: { ...gitEnv(), ...opts.env },
     stdio: opts.stdio,
     windowsHide: true,
   });
