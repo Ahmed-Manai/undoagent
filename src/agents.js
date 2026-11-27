@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findStore, homeDir, storeFor, unsafeRootReason, NAME } from './store.js';
+import { findStore, homeDir, isSkipped, storeFor, unsafeRootReason, NAME } from './store.js';
 import { beginTurn, endTurn } from './turns.js';
 
 // Both agents use the same hook format: { hooks: { Event: [{ hooks: [{ type, command, timeout }] }] } }
@@ -77,27 +77,37 @@ function logError(err) {
   } catch { /* never let logging break the agent */ }
 }
 
-/** Which store a hook call belongs to, or null when this folder isn't tracked. */
-function storeForHook(agent, input) {
+/**
+ * Which store a hook call belongs to, or null when this folder isn't tracked.
+ * `allProjects` comes from the Claude Code plugin: installing it means
+ * "track wherever I work", within the usual safety limits.
+ */
+function storeForHook(agent, input, allProjects) {
   const root = agent.rootFor(input) || process.cwd();
   const existing = findStore(root);
   if (existing) return existing;
-  if (!globalAgents()[agent.id] || unsafeRootReason(root)) return null;
-  return storeFor(root);
+  if (!(allProjects || globalAgents()[agent.id]) || unsafeRootReason(root)) return null;
+  const store = storeFor(root);
+  return isSkipped(store) ? null : store;
 }
+
+// undoagent's own slash commands (/undoagent:undo …) arrive as prompts too;
+// recording them as agent turns would make "undo" undoable by itself.
+const OWN_COMMAND = /^\s*\/undoagent:/;
 
 /**
  * Entry point for agent hooks. Must stay silent on stdout (both agents read
  * UserPromptSubmit output) and must never fail the agent's turn, so every
  * error is logged and swallowed.
  */
-export function runHook(agentId, raw) {
+export function runHook(agentId, raw, { allProjects = false } = {}) {
   try {
     const agent = agentById(agentId);
     const input = JSON.parse(raw);
     const event = input.hook_event_name;
     if (!EVENTS.includes(event) || agent.isSubagent(input)) return;
-    const store = storeForHook(agent, input);
+    if (event === 'UserPromptSubmit' && OWN_COMMAND.test(input.prompt || '')) return;
+    const store = storeForHook(agent, input, allProjects);
     if (!store) return;
     const session = `${agent.id}:${input.session_id || 'default'}`;
     if (event === 'UserPromptSubmit') beginTurn(store, { agent: agent.id, session, prompt: input.prompt });

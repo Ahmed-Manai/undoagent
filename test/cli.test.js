@@ -362,3 +362,38 @@ test('symlinks are restored as symlinks', { skip: process.platform === 'win32' &
   assert.equal(cli('undo').code, 0);
   assert.equal(fs.readlinkSync(p('link.txt')), 'target.txt');
 });
+
+// ---------- Claude Code plugin mode ----------
+
+function pluginHook(event, extra = {}) {
+  const input = JSON.stringify({ hook_event_name: event, session_id: 'p1', cwd: proj, ...extra });
+  const r = spawnSync(process.execPath, [BIN, 'hook', 'claude', '--all-projects'], {
+    cwd: proj, env: { ...env(), CLAUDE_PROJECT_DIR: proj }, input, encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, '');
+}
+
+test('plugin mode tracks a project without init, and ignores its own slash commands', () => {
+  write('a.txt', '1\n');
+  pluginHook('UserPromptSubmit', { prompt: 'edit a' });
+  write('a.txt', '2\n');
+  pluginHook('Stop');
+  pluginHook('UserPromptSubmit', { prompt: '/undoagent:undo' });
+  assert.equal(cli('undo').code, 0);
+  pluginHook('Stop');
+  assert.equal(read('a.txt'), '1\n');
+  const list = cli('list').out;
+  assert.match(list, /edit a/);
+  assert.doesNotMatch(list, /\/undoagent:undo/);
+  assert.ok(!fs.existsSync(path.join(tmp, 'store', 'error.log')), 'no hook errors');
+});
+
+test('plugin mode never tracks the home folder', () => {
+  const input = JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'p1', cwd: home, prompt: 'x' });
+  const r = spawnSync(process.execPath, [BIN, 'hook', 'claude', '--all-projects'], {
+    cwd: home, env: { ...env(), CLAUDE_PROJECT_DIR: home }, input, encoding: 'utf8',
+  });
+  assert.equal(r.status, 0);
+  assert.ok(!fs.existsSync(path.join(tmp, 'store', 'projects')), 'nothing created');
+});

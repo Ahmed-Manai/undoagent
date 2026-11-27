@@ -210,10 +210,10 @@ Every ${names} prompt in ${global ? 'any project' : 'this project'} is now a tur
     }
   },
 
-  hook({ args }) {
+  hook({ args, flags }) {
     let raw = '';
     try { raw = fs.readFileSync(0, 'utf8'); } catch { /* no stdin */ }
-    runHook(args[0], raw);
+    runHook(args[0], raw, { allProjects: !!flags['all-projects'] });
   },
 };
 

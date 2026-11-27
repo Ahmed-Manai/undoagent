@@ -6,6 +6,18 @@
 
 <sub>A real Claude Code session, recorded and sped up.</sub>
 
+## Install
+
+**Claude Code plugin** (easiest). Inside Claude Code, run:
+
+```
+/plugin install undoagent --marketplace Ahmed-Manai/undoagent
+```
+
+That's it: every project you open is tracked, and you get `/undoagent:list`, `/undoagent:undo`, `/undoagent:redo`, `/undoagent:diff` and `/undoagent:rewind` without leaving Claude Code. Needs Node.js 18.17+ and git on your PATH.
+
+**Command line** (Claude Code and Codex):
+
 ```bash
 npm install -g undoagent
 cd your-project

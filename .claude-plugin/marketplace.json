@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "undoagent",
+  "description": "Undo for AI coding agents",
+  "owner": {
+    "name": "Ahmed Manai"
+  },
+  "plugins": [
+    {
+      "name": "undoagent",
+      "description": "Every prompt becomes a checkpoint you can undo, redo or rewind, including changes made by shell commands.",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}

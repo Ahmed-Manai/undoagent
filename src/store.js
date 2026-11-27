@@ -99,6 +99,28 @@ export function checkSize(store) {
   return n;
 }
 
+// Folders that were too big to track are remembered, so automatic tracking
+// (plugin or --global) doesn't rescan them on every prompt.
+function skipMarker(store) {
+  return path.join(homeDir(), 'skipped', store.id);
+}
+
+export function isSkipped(store) {
+  return fs.existsSync(skipMarker(store));
+}
+
+export function markSkipped(store, reason) {
+  for (const name of fs.readdirSync(store.dir)) {
+    if (name !== 'lock') fs.rmSync(path.join(store.dir, name), { recursive: true, force: true });
+  }
+  fs.mkdirSync(path.dirname(skipMarker(store)), { recursive: true });
+  fs.writeFileSync(skipMarker(store), `${store.root}\n${reason}\n`);
+}
+
+export function clearSkipped(store) {
+  fs.rmSync(skipMarker(store), { force: true });
+}
+
 // ---------- locking ----------
 
 function sleep(ms) {

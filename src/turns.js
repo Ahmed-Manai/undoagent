@@ -1,5 +1,5 @@
 import {
-  changedFiles, checkSize, ensureStore, readHistory, restoreFiles, snapshot, withLock, writeHistory,
+  changedFiles, checkSize, clearSkipped, ensureStore, markSkipped, readHistory, restoreFiles, snapshot, withLock, writeHistory,
 } from './store.js';
 
 const PROMPT_MAX = 500;
@@ -13,7 +13,13 @@ export function initStore(store) {
   return withLock(store, () => {
     const created = ensureStore(store);
     if (created) {
-      checkSize(store);
+      try {
+        checkSize(store);
+      } catch (e) {
+        markSkipped(store, e.message);
+        throw e;
+      }
+      clearSkipped(store); // an explicit init re-checks folders skipped earlier
       snapshot(store, 'baseline');
     }
     return created;
@@ -61,7 +67,14 @@ export function fillFileLists(store) {
 /** Called when the user submits a prompt: snapshot "before". */
 export function beginTurn(store, { agent, session, prompt }) {
   return withLock(store, () => {
-    if (ensureStore(store)) checkSize(store);
+    if (ensureStore(store)) {
+      try {
+        checkSize(store);
+      } catch (e) {
+        markSkipped(store, e.message);
+        throw e;
+      }
+    }
     const pre = snapshot(store, `before: ${(prompt || '').slice(0, 72)}`);
     const h = readHistory(store);
     closeOpen(store, h, session, pre);

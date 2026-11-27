@@ -1,0 +1,12 @@
+{
+  "name": "undoagent",
+  "version": "0.3.0",
+  "description": "Undo for Claude Code: every prompt becomes a checkpoint you can undo, redo or rewind, including changes made by shell commands.",
+  "author": {
+    "name": "Ahmed Manai"
+  },
+  "homepage": "https://github.com/Ahmed-Manai/undoagent",
+  "repository": "https://github.com/Ahmed-Manai/undoagent",
+  "license": "MIT",
+  "keywords": ["undo", "checkpoint", "rewind", "safety"]
+}
