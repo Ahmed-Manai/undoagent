@@ -332,7 +332,7 @@ test('a project path with spaces works, and installed hook commands run as the a
     input: JSON.stringify({ hook_event_name: event, session_id: 'real', cwd: proj, prompt: 'via shell' }),
   });
   for (const [command, shell] of [[claudeCmd, 'bash'], [codexCmd, win ? 'cmd.exe' : '/bin/sh']]) {
-    const start = runAs(command.replace(/hook \w+$/, (m) => m), shell, 'UserPromptSubmit');
+    const start = runAs(command, shell, 'UserPromptSubmit');
     assert.equal(start.status, 0, `${shell}: ${start.stderr}`);
     write('a.txt', `${shell}\n`);
     const stop = runAs(command, shell, 'Stop');
