@@ -19,8 +19,8 @@ const HELP = `${bold(NAME)} ${pkg.version} - undo for AI coding agents
 Usage:
   ${NAME} init [--global]      Start tracking this project, or every project
                                with --global. Sets up hooks for the agents
-                               found on this machine (Claude Code, Codex);
-                               pick them with --agent claude,codex
+                               found on this machine (Claude Code, Codex,
+                               Gemini CLI); pick with --agent claude,codex,gemini
   ${NAME} list [-n N]          Show recent agent turns
   ${NAME} diff [ID] [--stat]   Show what a turn changed (default: latest)
   ${NAME} undo [ID] [--force]  Undo the latest turn, or turn ID
@@ -76,7 +76,7 @@ function oneLine(s, max) {
 }
 
 function shortAgent(id) {
-  return { claude: 'claude', 'claude-code': 'claude', codex: 'codex' }[id] || id || '';
+  return { claude: 'claude', 'claude-code': 'claude', codex: 'codex', gemini: 'gemini' }[id] || id || '';
 }
 
 function pickAgents(spec) {
@@ -213,7 +213,8 @@ Every ${names} prompt in ${global ? 'any project' : 'this project'} is now a tur
   hook({ args, flags }) {
     let raw = '';
     try { raw = fs.readFileSync(0, 'utf8'); } catch { /* no stdin */ }
-    runHook(args[0], raw, { allProjects: !!flags['all-projects'] });
+    const out = runHook(args[0], raw, { allProjects: !!flags['all-projects'] });
+    if (out) process.stdout.write(out);
   },
 };
 

@@ -28,12 +28,12 @@ function cli(...args) {
 
 function hook(event, extra = {}, agent = 'claude') {
   const input = JSON.stringify({ hook_event_name: event, session_id: 's1', cwd: proj, ...extra });
-  const extraEnv = agent === 'claude' ? { CLAUDE_PROJECT_DIR: proj } : {};
+  const extraEnv = agent === 'claude' ? { CLAUDE_PROJECT_DIR: proj } : agent === 'gemini' ? { GEMINI_PROJECT_DIR: proj } : {};
   const r = spawnSync(process.execPath, [BIN, 'hook', agent], {
     cwd: proj, env: { ...env(), ...extraEnv }, input, encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, '', 'hook must not print to stdout');
+  assert.equal(r.stdout, agent === 'gemini' ? '{}' : '', 'hooks print nothing but what the agent expects');
   return r;
 }
 
@@ -193,10 +193,10 @@ test('an interrupted turn is closed by the next prompt', () => {
 });
 
 test('the hook never fails the agent, even on garbage input', () => {
-  for (const agent of ['claude', 'codex', 'nonsense']) {
+  for (const [agent, expected] of [['claude', ''], ['codex', ''], ['gemini', '{}'], ['nonsense', '']]) {
     const r = spawnSync(process.execPath, [BIN, 'hook', agent], { cwd: proj, env: env(), input: 'not json', encoding: 'utf8' });
     assert.equal(r.status, 0);
-    assert.equal(r.stdout, '');
+    assert.equal(r.stdout, expected, agent);
   }
 });
 
@@ -396,4 +396,62 @@ test('plugin mode never tracks the home folder', () => {
   });
   assert.equal(r.status, 0);
   assert.ok(!fs.existsSync(path.join(tmp, 'store', 'projects')), 'nothing created');
+});
+
+// ---------- Gemini CLI ----------
+// Event names and fields from gemini-cli docs/hooks/reference.md.
+
+const geminiSettings = () => JSON.parse(fs.readFileSync(path.join(home, '.gemini', 'settings.json'), 'utf8'));
+
+function geminiTurn(prompt, work) {
+  const base = { session_id: 'g1', transcript_path: '/x', cwd: proj, timestamp: new Date().toISOString() };
+  hook('BeforeAgent', { ...base, prompt }, 'gemini');
+  work();
+  hook('AfterAgent', { ...base, prompt, prompt_response: 'done', stop_hook_active: false }, 'gemini');
+}
+
+test('Gemini CLI hooks go into ~/.gemini/settings.json without touching other settings', () => {
+  fs.mkdirSync(path.join(home, '.gemini'));
+  fs.writeFileSync(path.join(home, '.gemini', 'settings.json'), JSON.stringify({ theme: 'Dracula', hooks: {} }));
+  const r = cli('init', '--agent', 'gemini');
+  assert.equal(r.code, 0, r.err);
+  const s = geminiSettings();
+  assert.equal(s.theme, 'Dracula');
+  for (const ev of ['BeforeAgent', 'AfterAgent']) {
+    const h = s.hooks[ev][0].hooks[0];
+    assert.equal(h.type, 'command');
+    assert.equal(h.name, 'undoagent');
+    assert.equal(h.timeout, 60000, 'Gemini timeouts are in milliseconds');
+    assert.match(h.command, /hook gemini$/);
+    if (process.platform === 'win32') assert.match(h.command, /^& "/, 'PowerShell needs the call operator');
+  }
+  assert.equal(cli('uninstall', '--global', '--agent', 'gemini').code, 0);
+  assert.deepEqual(geminiSettings(), { theme: 'Dracula' });
+});
+
+test('Gemini CLI turns can be undone; the installed command runs in the shell Gemini uses', () => {
+  fs.mkdirSync(path.join(home, '.gemini'));
+  write('a.txt', '1\n');
+  cli('init', '--agent', 'gemini');
+  geminiTurn('gemini edits a', () => write('a.txt', '2\n'));
+  assert.match(cli('list').out, /gemini\s+1\s+gemini edits a/);
+  assert.equal(cli('undo').code, 0);
+  assert.equal(read('a.txt'), '1\n');
+
+  // Gemini runs hooks with `powershell -NoProfile -NonInteractive -Command <cmd>` on Windows, bash -c elsewhere.
+  const command = geminiSettings().hooks.BeforeAgent[0].hooks[0].command;
+  const [exe, args] = process.platform === 'win32'
+    ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command]]
+    : ['bash', ['-c', command]];
+  for (const event of ['BeforeAgent', 'AfterAgent']) {
+    if (event === 'AfterAgent') write('a.txt', 'via shell\n');
+    const r = spawnSync(exe, args, {
+      cwd: proj, encoding: 'utf8', env: { ...env(), GEMINI_PROJECT_DIR: proj },
+      input: JSON.stringify({ hook_event_name: event, session_id: 'g2', cwd: proj, prompt: 'shell turn' }),
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), {});
+  }
+  assert.match(cli('list').out, /shell turn/);
+  assert.ok(!fs.existsSync(path.join(tmp, 'store', 'error.log')), 'no hook errors');
 });

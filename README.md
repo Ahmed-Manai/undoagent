@@ -16,7 +16,7 @@
 
 That's it: every project you open is tracked, and you get `/undoagent:list`, `/undoagent:undo`, `/undoagent:redo`, `/undoagent:diff` and `/undoagent:rewind` without leaving Claude Code. Needs Node.js 18.17+ and git on your PATH.
 
-**Command line** (Claude Code and Codex):
+**Command line** (Claude Code, Codex and Gemini CLI):
 
 ```bash
 npm install -g undoagent
@@ -24,7 +24,7 @@ cd your-project
 undoagent init
 ```
 
-`init` sets up hooks for the agents it finds: **Claude Code** and **Codex** (beta). Then use your agent as usual. When a turn goes wrong:
+`init` sets up hooks for the agents it finds: **Claude Code**, plus **Codex** and **Gemini CLI** (both beta). Then use your agent as usual. When a turn goes wrong:
 
 ```console
 $ undoagent list
@@ -51,14 +51,14 @@ $ undoagent undo
 | History survives closing the session | Varies | ✅ |
 | Undo one old turn and keep later ones | ❌ | ✅ |
 | Refuses to overwrite your own edits made since | Varies | ✅ |
-| One history across agents | ❌ | Claude Code and Codex (beta) |
+| One history across agents | ❌ | Claude Code, Codex and Gemini CLI |
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `undoagent init` | Start tracking this project and set up hooks for the agents found on this machine |
-| `undoagent init --agent codex` | Choose agents yourself: `claude`, `codex`, or `claude,codex` |
+| `undoagent init --agent codex` | Choose agents yourself: `claude`, `codex`, `gemini`, or a list like `claude,gemini` |
 | `undoagent init --global` | Track every project you open, not just this one |
 | `undoagent list` | Recent agent turns, newest first |
 | `undoagent diff [ID]` | What a turn changed (`--stat` for a summary) |
@@ -80,7 +80,7 @@ $ undoagent undo
 
 - Node.js 18.17 or newer
 - git 2.25 or newer (only used internally; your project doesn't need to be a git repo)
-- Claude Code, or Codex
+- Claude Code, Codex or Gemini CLI
 
 ## Agent setup
 
@@ -88,9 +88,11 @@ $ undoagent undo
 
 **Codex (beta):** Codex reads hooks from one per-user file, `~/.codex/hooks.json`; undoagent only acts in projects you ran `init` in (or every project with `--global`). The next time Codex starts it shows **"Hooks need review"**: choose **"Trust all and continue"**, or the hooks won't run. Codex support is tested against Codex's hook format but is new, so please [report anything odd](https://github.com/Ahmed-Manai/undoagent/issues).
 
-## Limitations (v0.2)
+**Gemini CLI (beta):** hooks go into `~/.gemini/settings.json` (not the project's `.gemini/settings.json`, which is usually committed), and undoagent only acts in projects you ran `init` in, or every project with `--global`. Hooks are on by default; `/hooks panel` shows them. Restart running sessions after `init`.
 
-- Supported agents: Claude Code and Codex. Gemini CLI and a VS Code extension with a visual timeline are next.
+## Limitations (v0.4)
+
+- Supported agents: Claude Code, Codex (beta) and Gemini CLI (beta). A VS Code extension with a visual timeline is next.
 - Files inside nested git repositories (submodules) aren't snapshotted.
 - Projects with more than 50,000 non-ignored files are refused on first run; add a `.gitignore` for generated folders.
 - If two agent sessions edit the same project at the same time, their turns can overlap.
@@ -100,7 +102,8 @@ $ undoagent undo
 Vote or suggest features in the issues:
 
 - [x] Codex support (beta)
-- [ ] Gemini CLI support
+- [x] Gemini CLI support (beta)
+- [x] Claude Code plugin with slash commands
 - [ ] VS Code / Cursor extension with a timeline and side-by-side diffs
 - [ ] File-watcher mode for agents without hooks (Copilot, Cline, Cursor)
 
